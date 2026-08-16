@@ -1,4 +1,20 @@
+-- Builds the full character-creation menu tree: main page (name/dob/desc/
+-- gender/model) -> Customization -> Appearance/Clothing/Makeup/Hair
+-- sub-pages, each registered as a nested CharacterMenu page the same way
+-- (RegisterElement per option, live-applying via the client/helpers/
+-- character.lua AddComponent/SetCharExpression helpers as the player
+-- adjusts sliders/pickers). `SelectedAttributeElements` (client/helpers/
+-- general.lua) and `selectedClothingElements`/`SelectedOverlayElements`
+-- (this file) accumulate the in-progress character's state as the player
+-- moves through these pages; the final "Create" button (near the bottom of
+-- this file) packages all of it into the SaveCharacterData RPC + the
+-- UpdateAttributeDB event.
 local firstName, lastName, gender, charDesc, textureId, tx_color_type = '', '', GetGender(), "", -1, 0
+-- Town choice now happens here at creation time instead of a second picker
+-- after spawn.lua's SpawnSelect (see spawner.lua) -- defaults to the first
+-- configured town so a save without ever touching the arrows still lands
+-- somewhere valid.
+local SelectedTownIndex = 1
 selectedClothingElements = {}
 ActiveTexture, ActiveColor1, ActiveColor2, ActiveColor3, ActiveOpacity, ActiveVariant, CamZ, SelectedOverlayElements = {}, {}, {}, {}, {}, {}, Config.CameraCoords.creation.z + 0.5, {}
 
@@ -7,6 +23,8 @@ Fov = 20.0
 Model = 'mp_male'
 local dob, imgLink
 
+-- Server-pushed once the player has walked to the creation camera spot
+-- (client/services/character/create.lua).
 RegisterNetEvent('feather-character:CreateCharacterMenu', function()
     PageOpened = true
     local mainCreationPage = CharacterMenu:RegisterPage('feather-character:MainCreationPage')
@@ -268,11 +286,36 @@ RegisterNetEvent('feather-character:CreateCharacterMenu', function()
         imgLink = 'None'
     end
 
+    -- Starting town/arrival is chosen here, once, at creation time -- this
+    -- is what gets persisted by SaveCharacterData and later consumed by
+    -- spawner.lua's SpawnSelect to play the matching cinematic. There is no
+    -- second town choice after this.
+    local townOptions = {}
+    for _, town in ipairs(Config.SpawnCoords.towns) do
+        table.insert(townOptions, town.name .. " (" .. town.arrival .. ")")
+    end
+    mainCreationPage:RegisterElement('arrows', {
+        label = FeatherCore.Locale.translate(0, "chooseCity"),
+        start = SelectedTownIndex,
+        options = townOptions,
+    }, function(data)
+        -- `persistindex` is the 0-based index feather-menu's arrows element
+        -- posts alongside `value` (see ArrowSelectorComp.vue) -- convert to
+        -- the 1-based index Config.SpawnCoords.towns actually uses.
+        SelectedTownIndex = data.persistindex + 1
+    end)
+
     mainCreationPage:RegisterElement('line', {
         slot = "footer",
         style = {}
     })
 
+    -- Commits the new character: validates required fields, then saves the
+    -- base record via the SaveCharacterData RPC (server-derives the owning
+    -- user from `source`, see server/services/character.lua) and the
+    -- appearance separately via UpdateAttributeDB, before moving on to
+    -- SpawnSelect (client/services/character/spawner.lua) with the new
+    -- character's id.
     mainCreationPage:RegisterElement('button', {
         label = FeatherCore.Locale.translate(0, "saveChar"),
         slot = 'footer',
@@ -301,6 +344,16 @@ RegisterNetEvent('feather-character:CreateCharacterMenu', function()
             return
         end
 
+        -- UX guard only -- SelectedTownIndex defaults to 1 and can only ever
+        -- be set to a valid options index by the arrows callback above, so
+        -- this should never actually fire. The real boundary is server-side
+        -- (SaveCharacterData re-validates townindex against
+        -- Config.SpawnCoords.towns independently).
+        if not SelectedTownIndex or not Config.SpawnCoords.towns[SelectedTownIndex] then
+            Notify(FeatherCore.Locale.translate(0, "chooseCity"), "error", 5000)
+            return
+        end
+
         -- pack data
         local clothingJSON   = json.encode(selectedClothingElements or {})
         local attributesJSON = json.encode(SelectedAttributeElements or {})
@@ -313,6 +366,7 @@ RegisterNetEvent('feather-character:CreateCharacterMenu', function()
             model     = model,
             desc      = description,
             img       = imageUrl,
+            townindex = SelectedTownIndex,
         }
 
         FeatherCore.RPC.Call("SaveCharacterData", { data }, function(charId)
@@ -321,7 +375,7 @@ RegisterNetEvent('feather-character:CreateCharacterMenu', function()
                 return
             end
 
-            TriggerEvent('feather-character:SpawnSelect', charId)
+            TriggerEvent('feather-character:SpawnSelect', charId, SelectedTownIndex)
             TriggerServerEvent('feather-character:UpdateAttributeDB', charId, attributesJSON, clothingJSON, overlaysJSON)
 
             Notify(FeatherCore.Locale.translate(0, "characterSaved"), "success", 4000)
