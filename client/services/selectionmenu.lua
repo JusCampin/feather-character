@@ -1,12 +1,28 @@
 local name, money, birthday, desc, ID, img = {}, {}, {}, {}, {}, {}
 
+-- (CHAR-10) `img` is a client-controlled character field (see CHAR-09 --
+-- unvalidated at creation) concatenated directly into an <img src="..."> in
+-- the html element below. A value containing `"` closes the attribute
+-- early, letting anything after it become real markup in the NUI page.
+-- Escapes it before it goes anywhere near a raw HTML string.
+local function EscapeHtmlAttribute(value)
+    if type(value) ~= 'string' then return '' end
+    return (value:gsub('[&<>"\']', {
+        ['&'] = '&amp;',
+        ['<'] = '&lt;',
+        ['>'] = '&gt;',
+        ['"'] = '&quot;',
+        ["'"] = '&#39;',
+    }))
+end
+
 -- Builds the actual character-select UI page (name/money/gold/xp/tokens
 -- display, portrait, and next/prev paging) for whichever character is
 -- currently "on camera" (cameraSpot, an index into the arrays built here
 -- from `info`). Re-invoked every time the player pages to a different
 -- character (see the pagearrows element near the bottom).
 RegisterNetEvent('feather-character:CharacterSelectMenu',
-    function(info, cameraSpot, charAmount, clothing, attributes, overlays)
+    function(info, cameraSpot, charAmount, clothing, attributes, overlays, tints)
         for k, v in ipairs(info) do
             name[k] = v.first_name .. " " .. v.last_name
             money[k] = v.dollars
@@ -85,7 +101,7 @@ RegisterNetEvent('feather-character:CharacterSelectMenu',
                 value = {
                     [[
                 <img width="200px" height="100px" style="display: block; margin:10px auto;" src="]] ..
-                    img[cameraSpot] .. [[ " />
+                    EscapeHtmlAttribute(img[cameraSpot]) .. [[ " />
             ]]
                 }
             })
@@ -108,11 +124,21 @@ RegisterNetEvent('feather-character:CharacterSelectMenu',
             if cameraSpot ~= nil then
                 Spawned = false
                 CleanupScript()
-                LoadPlayer(CharModel)
+                -- (CHAR-12) Was `LoadPlayer(CharModel)` -- `CharModel` is a
+                -- global overwritten on every iteration of the spawn loop in
+                -- character/selector.lua (SelectCharacterScreen), so by the
+                -- time this button handler runs it always holds whichever
+                -- character was *last* iterated there, not the one actually
+                -- on camera/selected. Selecting character #1 could spawn
+                -- character #3's model. `info[cameraSpot].model` is the
+                -- server-verified model for the character actually being
+                -- selected right now.
+                LoadPlayer(info[cameraSpot].model)
                 TriggerServerEvent('feather-character:InitiateCharacter', ID[cameraSpot])
                 Characterid = ID[cameraSpot]
+                local charTints = (tints and tints[cameraSpot]) or {}
                 for category, hash in pairs(clothing[cameraSpot]) do
-                    AddComponent(PlayerPedId(), hash, category)
+                    AddComponent(PlayerPedId(), hash, category, charTints[category])
                 end
                 for category, attribute in pairs(attributes[cameraSpot]) do
                     if category == 'Albedo' then
@@ -161,12 +187,16 @@ RegisterNetEvent('feather-character:CharacterSelectMenu',
                     Config.CameraCoords.charcamera[cameraSpot].zoom)
                 TriggerEvent('feather-character:CharacterSelectMenu', info, cameraSpot, charAmount, clothing, attributes,overlays)
             else
-                if cameraSpot < charAmount then
-                    cameraSpot = cameraSpot - 1
-                end
-                if cameraSpot >= charAmount then
-                    cameraSpot = 1
-                end
+                -- (CHAR-14) Was three separate conditionals
+                -- (`if cameraSpot < charAmount then -1 end`,
+                -- `if cameraSpot >= charAmount then =1 end`, ...) -- paging
+                -- backward from the *last* character hit the second branch
+                -- before ever decrementing (cameraSpot == charAmount makes
+                -- the first check false), jumping straight to character 1
+                -- and skipping character (charAmount - 1) entirely. Mirrors
+                -- the forward branch above: decrement unconditionally, then
+                -- wrap.
+                cameraSpot = cameraSpot - 1
                 if cameraSpot < 1 then
                     cameraSpot = charAmount
                 end

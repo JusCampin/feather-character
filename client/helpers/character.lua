@@ -16,13 +16,48 @@ function UpdatePedVariation(ped)
     Citizen.InvokeNative(0xCC8CA3E88256E58F, ped, false, true, true, true, false) -- _UPDATE_PED_VARIATION
 end
 
-function AddComponent(ped, comp, category)
+-- (CHAR-20) `tint`, when passed, re-applies a saved dye. Tints ({c1,c2,c3})
+-- used to only ever be applied live from clothing_pages.lua's own dye
+-- picker and were never carried into the saved clothing blob, so a dyed
+-- item reset to its base color on the next relog. Re-derives the drawable/
+-- albedo/normal/material/palette needed by _SET_META_PED_TAG the same way
+-- clothing_pages.lua's own live preview does (there's no native that just
+-- takes "this component, this tint" directly).
+function AddComponent(ped, comp, category, tint)
     if category ~= nil then
         RemoveTagFromMetaPed(category)
     end
     Citizen.InvokeNative(0xD3A7B003ED343FD9, ped, comp, true, true, false)
     Citizen.InvokeNative(0x66b957aac2eaaeab, ped, comp, 0, 0, 1, 1) -- _UPDATE_SHOP_ITEM_WEARABLE_STATE
     UpdatePedVariation(ped)
+
+    if tint then
+        local pedType = Citizen.InvokeNative(0xEC9A1261BF0CE510, ped)
+        local activeCategory = Citizen.InvokeNative(0x5FF9A878C3D115B8, comp, pedType, true)
+        local componentIndex
+        local numComponents = Citizen.InvokeNative(0x90403E8107B60E81, ped, Citizen.ResultAsInteger())
+        for i = 0, numComponents - 1 do
+            local compCategory = Citizen.InvokeNative(0x9B90842304C938A7, ped, i, 0, Citizen.ResultAsInteger())
+            if compCategory == activeCategory then
+                componentIndex = i
+                break
+            end
+        end
+        if componentIndex ~= nil then
+            local drawable, albedo, normal, material = Citizen.InvokeNative(
+                0xA9C28516A6DC9D56, ped, componentIndex,
+                Citizen.PointerValueInt(), Citizen.PointerValueInt(),
+                Citizen.PointerValueInt(), Citizen.PointerValueInt()
+            )
+            local palette = Citizen.InvokeNative(
+                0xE7998FEC53A33BBE, ped, componentIndex,
+                Citizen.PointerValueInt(), Citizen.PointerValueInt(),
+                Citizen.PointerValueInt(), Citizen.PointerValueInt()
+            )
+            Citizen.InvokeNative(0xBC6DF00D7A4A6819, ped, drawable, albedo, normal, material, palette, tint[1], tint[2], tint[3])
+            UpdatePedVariation(ped)
+        end
+    end
 end
 
 function RemoveTagFromMetaPed(category)

@@ -76,12 +76,13 @@ if Config.DevMode then
         LoadPlayer(CharModel)
 
         -- Clothing
-        for category, hash in pairs(SentClothing[Characterid] or {}) do
-            AddComponent(PlayerPedId(), hash, category)
+        local charTints = FetchedTints[Characterid] or {}
+        for category, hash in pairs(FetchedClothing[Characterid] or {}) do
+            AddComponent(PlayerPedId(), hash, category, charTints[category])
         end
 
         -- Attributes
-        for category, attribute in pairs(SentAttributes[Characterid] or {}) do
+        for category, attribute in pairs(FetchedAttributes[Characterid] or {}) do
             if category == 'Albedo' then
                 AlbedoHash = attribute.hash
             end
@@ -94,7 +95,7 @@ if Config.DevMode then
         end
 
         -- Overlays
-        for category, overlays in pairs(SentOverlays[Characterid] or {}) do
+        for category, overlays in pairs(FetchedOverlays[Characterid] or {}) do
             ChangeOverlay(
                 PlayerPedId(),
                 category,

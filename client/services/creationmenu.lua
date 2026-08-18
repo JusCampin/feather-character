@@ -16,6 +16,7 @@ local firstName, lastName, gender, charDesc, textureId, tx_color_type = '', '', 
 -- somewhere valid.
 local SelectedTownIndex = 1
 selectedClothingElements = {}
+selectedClothingTints = {} -- (CHAR-20) index -> {c1,c2,c3}, see clothing/clothing_pages.lua
 ActiveTexture, ActiveColor1, ActiveColor2, ActiveColor3, ActiveOpacity, ActiveVariant, CamZ, SelectedOverlayElements = {}, {}, {}, {}, {}, {}, Config.CameraCoords.creation.z + 0.5, {}
 
 Pages = Pages or {}
@@ -41,10 +42,20 @@ RegisterNetEvent('feather-character:CreateCharacterMenu', function()
         start = 1,
         options = { maleLabel, femaleLabel },
     }, function(data)
+        -- (CHAR-11) `gender` was captured once from GetGender() at file
+        -- load (module scope, line 12) and never updated -- picking a
+        -- different gender here correctly changed `Model`, but every
+        -- CharacterConfig.General.DefaultChar[gender] lookup in the
+        -- appearance/heritage pages below kept indexing with whatever
+        -- gender the player happened to already be at menu load, handing a
+        -- player who picked Female the Male heritage/head/body/leg pools
+        -- (or vice versa).
         if data.value == maleLabel then
             Model = 'mp_male'
+            gender = 'Male'
         else
             Model = 'mp_female'
+            gender = 'Female'
         end
         LoadPlayer(Model)
     end)
@@ -355,7 +366,13 @@ RegisterNetEvent('feather-character:CreateCharacterMenu', function()
         end
 
         -- pack data
+        -- (CHAR-20) `character_appearance.clothingtints` (feather-recipe's
+        -- migration.sql) already exists as its own column for exactly this
+        -- -- it was just never written to. Sent alongside clothingJSON
+        -- rather than nested inside it, so the `clothing` blob's shape
+        -- doesn't change for anything already reading it.
         local clothingJSON   = json.encode(selectedClothingElements or {})
+        local tintsJSON      = json.encode(selectedClothingTints or {})
         local attributesJSON = json.encode(SelectedAttributeElements or {})
         local overlaysJSON   = json.encode(SelectedOverlayElements or {})
 
@@ -376,7 +393,7 @@ RegisterNetEvent('feather-character:CreateCharacterMenu', function()
             end
 
             TriggerEvent('feather-character:SpawnSelect', charId, SelectedTownIndex)
-            TriggerServerEvent('feather-character:UpdateAttributeDB', charId, attributesJSON, clothingJSON, overlaysJSON)
+            TriggerServerEvent('feather-character:UpdateAttributeDB', charId, attributesJSON, clothingJSON, overlaysJSON, tintsJSON)
 
             Notify(FeatherCore.Locale.translate(0, "characterSaved"), "success", 4000)
         end)
